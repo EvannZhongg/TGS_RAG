@@ -11,7 +11,7 @@ from retriever_db import PathSBERetriever
 from streamlit_agraph import agraph, Node, Edge, Config
 
 # --- 页面配置 ---
-st.set_page_config(page_title="可视化路径增强RAG (Path-SBEA)", layout="wide")
+st.set_page_config(page_title="Text-Graph-Synergy-RAG", layout="wide")
 
 
 # --- 缓存和加载 ---
@@ -377,4 +377,5 @@ if 'results' in st.session_state and 'viz_data_cache' in st.session_state:
             st.markdown("#### Token 消耗")
             usage = diagnostics.get('llm_extraction', {}).get('usage')
             if usage:
+
                 st.metric(label="实体抽取总 Tokens", value=usage.total_tokens)
