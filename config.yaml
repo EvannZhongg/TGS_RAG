@@ -1,0 +1,86 @@
+General:
+  rag_space: "test" # 你的知识库名称，将作为顶级文件夹名
+  processing_interval_seconds: 0 # 每个文件处理完后的等待时间（秒），可以设为0
+
+
+PDF processing:
+  OCR: false
+  Page save: false  # 设置为 true 来保存分页图片，false 则不保存
+  Page dpi: 200    # 设置保存图片的分辨率 (DPI)
+
+Chunking:
+  strategy: fixed  # 分块策略。可选值: 'fixed' 或 'semantic'
+
+  # 'fixed' 策略的配置
+  fixed_size: 1200
+  fixed_overlap: 100
+
+  # 'semantic' 策略的配置
+  semantic_target: 900 # 语义块组合的目标 token 上限
+  semantic_overlap: 150   # 语义块之间的目标重叠 token
+  semantic_pre_context_limit: 50 # 当一个大单元（如表格）开启新分块时，可额外包含的前置上下文（如标题）的最大token限制
+  semantic_hard_limit: 500 # 如果一个单元本身就超过这个值，则完全放弃为下一个块创建重叠
+
+Database:
+  ENGINE: 'django.db.backends.postgresql'
+  NAME: 'TGS_RAG'
+  USER: 'postgres'
+  PASSWORD: '15905190993zjr'
+  HOST: 'localhost'
+  PORT: '5433'
+
+Embedding:
+  api_key: "sk-******"
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  model_name: "text-embedding-v4"
+  dimensions: 1024
+  max_batch_size: 10
+  max_retries: 50
+  retry_delay_seconds: 2
+
+LLM:
+  api_key: "sk-******"
+  base_url: "https://chatapi.littlewheat.com/v1"
+  model_name: "gpt-4o-mini"
+  max_async: 4
+  max_retries: 50
+  retry_delay_seconds: 2
+
+VLM:
+  api_key: "sk-******"
+  base_url: "https://qwen-vl.evanzhong.cn/v1"
+  model_name: "Qwen/Qwen2.5-VL-7B-Instruct"
+  max_async: 1
+
+Extraction:
+  # 用于 Prompt，定义实体可以被分为哪些类型
+  entity_types:
+    - "person"
+    - "organization"
+    - "location"
+    - "event"
+    - "product"
+    - "concept"
+    - "equipment"
+    - "category"
+    - "other"
+  # 控制是否启用二次修正流程。大于0则启用。
+  entity_extract_max_gleaning: 0
+
+
+GraphRetrieval:
+  top_p_per_entity: 3          # Top-P entities to retrieve per query entity
+  bfs_depth: 4                 # Maximum hops in graph pathfinding
+  top_k_orphans_to_bridge: 3   # Number of orphan entities to bridge
+
+Scoring:
+  chunk_score_alpha: 0.6                      # Weight for similarity vs. graph recommendations
+  seed_density_bonus: 0.5                     # Bonus for paths with high seed density
+  text_confirmation_bonus: 0.5                # Bonus per entity overlap with chunks
+  entity_degree_weight: 0.01                  # Weight for entity connectivity
+  relation_degree_weight: 0.01                # Weight for relation frequency
+  strong_chunk_recommendation_bonus: 0.25     # Bonus for initial chunk recommendations
+  weak_chunk_recommendation_bonus: 0.15       # Bonus for graph-only recommendations
+  endorsement_base_bonus: 0.1                 # Base bonus for orphan endorsement
+  endorsement_decay_factor: 0.85              # Decay per hop in bridge path
+  top_rec_k_for_similarity: 5                 # Top graph recommendations to score
