@@ -2,6 +2,7 @@
 
 ## 依赖安装
 ```
+pip install -r requirements.txt
 pip install 'docling[pdf]'    
 docling-tools models download -o D:\Personal_Project\BiRAG\model
 ```
@@ -50,4 +51,44 @@ python search_kb.py list
 5. 帮助菜单 ，查看可用参数：
 ```
 python search_kb.py -h
+```
+ 
+## docker 配置
+```
+{
+  "builder": {
+    "gc": {
+      "defaultKeepStorage": "20GB",
+      "enabled": true
+    }
+  },
+  "experimental": false,
+  "features": {
+    "buildkit": true
+  },
+  "registry-mirrors": [
+    "https://docker.xuanyuan.me"
+  ]
+}
+```
+
+```
+docker pull pgvector/pgvector:pg16
+```
+
+注意端口号
+
+```
+docker run -d \
+  --name pgvector-db \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=密码 \
+  -e POSTGRES_DB=名称 \
+  -p 5433:5432 \
+  -v pgvector_data:/var/lib/postgresql/data \
+  pgvector/pgvector:pg16
+  ```
+```js
+docker exec -it pgvector-db psql -U postgres -d postgres
+CREATE EXTENSION IF NOT EXISTS vector;
 ```
