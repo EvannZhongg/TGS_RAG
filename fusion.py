@@ -113,43 +113,34 @@ def fuse_and_update_knowledge_base(
     if not new_entities_df.empty:
         new_entities_df['entity_name'] = new_entities_df['entity_name'].str.strip()
         
-        # 1.1 按需查询：只查数据库中已存在的同名实体
         unique_names = new_entities_df['entity_name'].unique().tolist()
         existing_entities_df = pd.DataFrame()
         
         if unique_names:
-            # 处理 SQL 转义
             safe_names = [n.replace("'", "''") for n in unique_names]
-            # 分批查询以防止 SQL 过长 (虽然 text-list 一般不大)
             if len(safe_names) > 0:
                 names_str = "', '".join(safe_names)
                 sql = text(f"SELECT * FROM {schema}.entities WHERE entity_name IN ('{names_str}')")
                 with engine.connect() as conn:
                     existing_entities_df = pd.read_sql(sql, conn)
 
-        # 1.2 预处理旧数据格式
         if not existing_entities_df.empty:
-             # JSON 解析
              existing_entities_df['source_chunk_ids'] = existing_entities_df['source_chunk_ids'].apply(
                  lambda x: x if isinstance(x, list) else (json.loads(x) if isinstance(x, str) else [])
              )
-             # Vector 解析
              existing_entities_df['embedding'] = existing_entities_df['embedding'].apply(
                 lambda x: np.array(json.loads(x)) if isinstance(x, str) else (np.array(x) if x is not None else None)
              )
 
-        # 1.3 内存合并
         combined_entities_df = pd.concat([existing_entities_df, new_entities_df], ignore_index=True)
         combined_entities_df['source_chunk_ids'] = combined_entities_df['source_chunk_ids'].apply(
              lambda x: x if isinstance(x, list) else (json.loads(x) if isinstance(x, str) else [])
         )
 
-        # 1.4 分组聚合
         final_entities_rows = []
         grouped = combined_entities_df.groupby('entity_name')
         
         for name, group in grouped:
-            # 优先沿用旧 ID
             first_row = group.iloc[0]
             eid = first_row['entity_id']
             existing_record = group[group['entity_id'].astype(str).str.startswith('ent-')]
@@ -164,7 +155,6 @@ def fuse_and_update_knowledge_base(
             freq = group['frequency'].sum()
             chunks = list(set(sum(group['source_chunk_ids'], [])))
             
-            # 描述融合 & Embedding 检查
             new_description = _merge_and_summarize_group(
                 group, name, 'description', 'entity', llm_config, token_usage
             )
@@ -208,8 +198,6 @@ def fuse_and_update_knowledge_base(
         new_relations_df['target_name'] = new_relations_df['target_name'].str.strip()
         new_relations_df['key'] = new_relations_df.apply(lambda row: tuple(sorted((str(row['source_name']), str(row['target_name'])))), axis=1)
         
-        # 2.1 按需查询：查找涉及这些实体的旧关系
-        # 只要 source 或 target 在本次涉及的实体名单中，就有可能发生合并
         unique_keys = new_relations_df['key'].unique().tolist()
         involved_names = set()
         for k in unique_keys:
@@ -221,7 +209,6 @@ def fuse_and_update_knowledge_base(
             safe_names = [n.replace("'", "''") for n in involved_names]
             names_str = "', '".join(safe_names)
             
-            # 查询 source 和 target 都在 involved_names 中的关系 (这是无向图合并的最小闭包)
             sql = text(f"""
                 SELECT * FROM {schema}.relationships 
                 WHERE source_name IN ('{names_str}') AND target_name IN ('{names_str}')
@@ -229,7 +216,6 @@ def fuse_and_update_knowledge_base(
             with engine.connect() as conn:
                 existing_relations_df = pd.read_sql(sql, conn)
 
-        # 2.2 预处理旧关系
         if not existing_relations_df.empty:
              existing_relations_df['source_chunk_ids'] = existing_relations_df['source_chunk_ids'].apply(
                  lambda x: x if isinstance(x, list) else (json.loads(x) if isinstance(x, str) else [])
@@ -237,15 +223,12 @@ def fuse_and_update_knowledge_base(
              existing_relations_df['embedding'] = existing_relations_df['embedding'].apply(
                 lambda x: np.array(json.loads(x)) if isinstance(x, str) else (np.array(x) if x is not None else None)
              )
-             # 生成 key 用于合并
              existing_relations_df['key'] = existing_relations_df.apply(
                  lambda row: tuple(sorted((str(row['source_name']), str(row['target_name'])))), axis=1
              )
-             # 过滤：只保留 key 在 unique_keys 中的 (精确匹配)
              existing_keys_set = set(unique_keys)
              existing_relations_df = existing_relations_df[existing_relations_df['key'].isin(existing_keys_set)]
 
-        # 2.3 内存合并
         combined_relations_df = pd.concat([existing_relations_df, new_relations_df], ignore_index=True)
         combined_relations_df['source_chunk_ids'] = combined_relations_df['source_chunk_ids'].apply(
              lambda x: x if isinstance(x, list) else (json.loads(x) if isinstance(x, str) else [])
@@ -310,15 +293,11 @@ def fuse_and_update_knowledge_base(
     # 3. 实体补全 (Placeholders) & ID 映射
     # ==========================================
     if not final_relations_df.empty:
-        # 确保 source_id / target_id 存在
-        # 先用 final_entities_df 映射
         name_to_id = dict(zip(final_entities_df['entity_name'], final_entities_df['entity_id'])) if not final_entities_df.empty else {}
         
-        # 找出还缺 ID 的实体名
         needed_names = set(final_relations_df['source_name']) | set(final_relations_df['target_name'])
         missing_names = [n for n in needed_names if n not in name_to_id]
         
-        # 再次查询 DB，看这些缺失的是否早已存在但本次没更新
         if missing_names:
             safe_miss = [n.replace("'", "''") for n in missing_names]
             miss_str = "', '".join(safe_miss)
@@ -327,9 +306,8 @@ def fuse_and_update_knowledge_base(
                 res = conn.execute(sql).fetchall()
                 for row in res:
                     name_to_id[row[0]] = row[1]
-                    touched_entity_ids.add(row[1]) # 记录这些相关实体用于 Degree 更新
+                    touched_entity_ids.add(row[1])
         
-        # 剩下的才是真缺失，创建 Placeholder
         real_missing = [n for n in missing_names if n not in name_to_id]
         if real_missing:
             new_placeholders = []
@@ -351,7 +329,6 @@ def fuse_and_update_knowledge_base(
             if new_placeholders:
                 final_entities_df = pd.concat([final_entities_df, pd.DataFrame(new_placeholders)], ignore_index=True)
 
-        # 应用映射
         final_relations_df['source_id'] = final_relations_df['source_name'].map(name_to_id)
         final_relations_df['target_id'] = final_relations_df['target_name'].map(name_to_id)
 
@@ -397,10 +374,8 @@ def fuse_and_update_knowledge_base(
     # ==========================================
     # 5. 保存到数据库 (Upsert)
     # ==========================================
-    # 数据清理
     for df in [final_entities_df, final_relations_df]:
         if not df.empty:
-            # Degree 和 Frequency 在 Python 端暂时填0或累加值，稍后 SQL 统一更新 Degree
             if 'degree' in df.columns: df['degree'] = df['degree'].fillna(0).astype(int)
             if 'frequency' in df.columns: df['frequency'] = df['frequency'].fillna(0).astype(int)
 
@@ -416,12 +391,11 @@ def fuse_and_update_knowledge_base(
     db.save_df(final_relations_df, 'relationships', pk_col='relation_id')
 
     # ==========================================
-    # 6. SQL Degree 更新 (高效更新)
+    # 6. SQL Entity Degree Update
     # ==========================================
     if touched_entity_ids:
-        print(f"   - Updating degrees for {len(touched_entity_ids)} entities via SQL...")
+        print(f"   - Updating entity degrees for {len(touched_entity_ids)} entities via SQL...")
         ids_tuple = tuple(touched_entity_ids)
-        # 如果 ID 只有一个，tuple 转换后会有尾逗号问题，手动处理 string
         ids_sql_str = str(ids_tuple) if len(ids_tuple) > 1 else f"('{list(touched_entity_ids)[0]}')"
         
         sql_degree = text(f"""
@@ -442,21 +416,39 @@ def fuse_and_update_knowledge_base(
             print(f"⚠️ Degree update failed: {e}")
 
     # ==========================================
+    # 6.5 SQL Relation Degree Update (基于实体权重)
+    # ==========================================
+    if touched_entity_ids:
+        print(f"   - Updating relation weights based on connected entities' importance...")
+        
+        # 更新涉及这些实体的所有关系的权重
+        sql_rel_degree = text(f"""
+            UPDATE {schema}.relationships r
+            SET degree = (
+                COALESCE((SELECT degree FROM {schema}.entities WHERE entity_id = r.source_id), 0) + 
+                COALESCE((SELECT degree FROM {schema}.entities WHERE entity_id = r.target_id), 0)
+            )
+            WHERE r.source_id IN {ids_sql_str} OR r.target_id IN {ids_sql_str}
+        """)
+        
+        try:
+            with engine.connect() as conn:
+                conn.execute(sql_rel_degree)
+                conn.commit()
+        except Exception as e:
+            print(f"⚠️ Relation weight update failed: {e}")
+
+    # ==========================================
     # 7. 保存 Chunks 并建立映射
     # ==========================================
     print(f"   - Saving chunks mapping...")
     
-    # all_new_chunks_df 只有当前 batch 的 chunk
     target_chunks_df = all_new_chunks_df.copy()
     target_chunks_df['entity_ids'] = [[] for _ in range(len(target_chunks_df))]
     target_chunks_df['relation_ids'] = [[] for _ in range(len(target_chunks_df))]
     
-    # 为了快速反查，建立 chunk_id -> index 映射
     chunk_index_map = {cid: idx for idx, cid in enumerate(target_chunks_df['chunk_id'])}
 
-    # 遍历本次涉及的所有实体/关系，如果它们属于当前 Batch 的 chunk，则添加进去
-    # 注意：final_entities_df 包含了本次更新的所有实体，它们的 source_chunk_ids 是全量的
-    
     for _, entity in final_entities_df.iterrows():
         sources = entity.get('source_chunk_ids', [])
         if isinstance(sources, list):
