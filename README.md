@@ -14,17 +14,17 @@ docling-tools models download -o D:\Personal_Project\BiRAG\model
 python manage_db.py init
 ```
 ## 第二步：运行主程序
-现在你可以正常运行主程序了，它会自动检测到数据库并在其中建立表结构：
+现在可以正常运行主程序，它会自动检测到数据库并在其中建立表结构：
 ```
 python TGSRAG.py
 ```
 
 ## 第三步：(如果需要) 删除某个知识库
-如果你想清空 my_electronics_kb 的数据重新跑，可以使用：
+如果想清空知识库 my_kb 的数据重新跑，可以使用：
 ```
 python manage_db.py delete my_kb
 ```
-这会执行 DROP SCHEMA my_electronics_kb CASCADE，彻底清除该知识库下的所有表和数据，但不影响其他知识库。
+这会执行 DROP SCHEMA my_kb CASCADE，彻底清除该知识库下的所有表和数据，但不影响其他知识库。
 
 ## 数据库搜索
 1. 基础用法（搜索所有表）
